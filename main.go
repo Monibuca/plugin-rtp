@@ -2,6 +2,8 @@ package plugin_rtp
 
 import (
 	. "github.com/Monibuca/engine/v2"
+	"github.com/Monibuca/engine/v2/avformat"
+	"github.com/Monibuca/engine/v2/util"
 	"github.com/pion/rtp"
 )
 
@@ -36,26 +38,70 @@ func (rt RTPType) String() string {
 type RTP struct {
 	NALU
 }
-
+type RTP_PS struct {
+	RTP
+	rtp.Packet
+	psPacket []byte
+	parser DecPSPackage
+}
+func (rtp *RTP_PS) PushPS (ps []byte) {
+	if err := rtp.Unmarshal(ps); err != nil {
+		Println(err)
+	}
+	if len(rtp.Payload) >= 4 && util.BigEndian.Uint32(rtp.Payload) == StartCodePS {
+		if rtp.psPacket != nil{
+			if err := rtp.parser.Read(rtp.psPacket); err == nil {
+				for _, payload := range avformat.SplitH264(rtp.parser.VideoPayload) {
+					rtp.WriteNALU(rtp.Timestamp, payload)
+				}
+				if rtp.parser.AudioPayload != nil{
+					//TODO: 需要增加一个字节的头
+					//rtpPublisher.PushAudio(psRtp.Timestamp, parser.AudioPayload)
+				}
+			} else {
+				Print(err)
+			}
+			rtp.psPacket = nil
+		}
+		rtp.psPacket = append(rtp.psPacket, rtp.Payload...)
+	} else if rtp.psPacket != nil {
+		rtp.psPacket = append(rtp.psPacket, rtp.Payload...)
+	}
+}
 func (rtp *RTP) PushPack(pack *RTPPack) {
 	switch pack.Type {
 	case RTP_TYPE_AUDIO:
 		payload := pack.Payload
-		auHeaderLen := (int16(payload[0]) << 8) + int16(payload[1])
-		auHeaderLen = auHeaderLen >> 3
-		auHeaderCount := int(auHeaderLen / 2)
-		var auLenArray []int
-		for iIndex := 0; iIndex < int(auHeaderCount); iIndex++ {
-			auHeaderInfo := (int16(payload[2+2*iIndex]) << 8) + int16(payload[2+2*iIndex+1])
-			auLen := auHeaderInfo >> 3
-			auLenArray = append(auLenArray, int(auLen))
-		}
-		startOffset := 2 + 2*auHeaderCount
-		for _, auLen := range auLenArray {
-			endOffset := startOffset + auLen
-			addHead := []byte{0xAF, 0x01}
-			rtp.PushAudio(0, append(addHead, payload[startOffset:endOffset]...))
-			startOffset = startOffset + auLen
+		switch rtp.AudioInfo.SoundFormat {
+		case 10:
+			auHeaderLen := (int16(payload[0]) << 8) + int16(payload[1])
+			auHeaderLen = auHeaderLen >> 3
+			auHeaderCount := int(auHeaderLen / 2)
+			var auLenArray []int
+			for iIndex := 0; iIndex < int(auHeaderCount); iIndex++ {
+				auHeaderInfo := (int16(payload[2+2*iIndex]) << 8) + int16(payload[2+2*iIndex+1])
+				auLen := auHeaderInfo >> 3
+				auLenArray = append(auLenArray, int(auLen))
+			}
+			startOffset := 2 + 2*auHeaderCount
+			for _, auLen := range auLenArray {
+				endOffset := startOffset + auLen
+				addHead := []byte{0xAF, 0x01}
+				rtp.PushAudio(pack.Timestamp, append(addHead, payload[startOffset:endOffset]...))
+				startOffset = startOffset + auLen
+			}
+		case 7,8:
+			asc := rtp.AudioInfo.SoundFormat<<4
+			switch {
+			case rtp.AudioInfo.SoundRate>=44000:
+				asc = asc + (3<<2)
+			case rtp.AudioInfo.SoundRate>=22000:
+				asc = asc + (2<<2)
+			case rtp.AudioInfo.SoundRate>=11000:
+				asc = asc + (1<<2)
+			}
+			asc = asc+ 1<<1
+			rtp.PushAudio(pack.Timestamp,append([]byte{asc},payload...))
 		}
 	case RTP_TYPE_VIDEO:
 		rtp.WriteNALU(pack.Timestamp, pack.Payload)
