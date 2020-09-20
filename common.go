@@ -14,11 +14,12 @@ const (
 const (
 	StreamTypeH264 = 0x1b
 	StreamTypeH265 = 0x24
-	G711Mu  = 0x90
+	G711A          = 0x90 //PCMA
 	G7221AUDIOTYPE = 0x92
 	G7231AUDIOTYPE = 0x93
 	G729AUDIOTYPE  = 0x99
 )
+
 //
 const (
 	StreamIDVideo = 0xe0

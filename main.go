@@ -42,21 +42,29 @@ type RTP_PS struct {
 	RTP
 	rtp.Packet
 	psPacket []byte
-	parser DecPSPackage
+	parser   DecPSPackage
 }
-func (rtp *RTP_PS) PushPS (ps []byte) {
+
+func (rtp *RTP_PS) PushPS(ps []byte) {
 	if err := rtp.Unmarshal(ps); err != nil {
 		Println(err)
 	}
 	if len(rtp.Payload) >= 4 && util.BigEndian.Uint32(rtp.Payload) == StartCodePS {
-		if rtp.psPacket != nil{
+		if rtp.psPacket != nil {
 			if err := rtp.parser.Read(rtp.psPacket); err == nil {
 				for _, payload := range avformat.SplitH264(rtp.parser.VideoPayload) {
 					rtp.WriteNALU(rtp.Timestamp, payload)
 				}
-				if rtp.parser.AudioPayload != nil{
-					//TODO: 需要增加一个字节的头
-					//rtpPublisher.PushAudio(psRtp.Timestamp, parser.AudioPayload)
+				if rtp.parser.AudioPayload != nil {
+					switch rtp.parser.AudioStreamType {
+					case G711A:
+						rtp.AudioInfo.SoundFormat = 7
+						rtp.AudioInfo.SoundRate = 8000
+						rtp.AudioInfo.SoundSize = 16
+						asc := rtp.AudioInfo.SoundFormat << 4
+						asc = asc + 1<<1
+						rtp.PushAudio(rtp.Timestamp, append([]byte{asc}, rtp.parser.AudioPayload...))
+					}
 				}
 			} else {
 				Print(err)
@@ -90,18 +98,18 @@ func (rtp *RTP) PushPack(pack *RTPPack) {
 				rtp.PushAudio(pack.Timestamp, append(addHead, payload[startOffset:endOffset]...))
 				startOffset = startOffset + auLen
 			}
-		case 7,8:
-			asc := rtp.AudioInfo.SoundFormat<<4
+		case 7, 8:
+			asc := rtp.AudioInfo.SoundFormat << 4
 			switch {
-			case rtp.AudioInfo.SoundRate>=44000:
-				asc = asc + (3<<2)
-			case rtp.AudioInfo.SoundRate>=22000:
-				asc = asc + (2<<2)
-			case rtp.AudioInfo.SoundRate>=11000:
-				asc = asc + (1<<2)
+			case rtp.AudioInfo.SoundRate >= 44000:
+				asc = asc + (3 << 2)
+			case rtp.AudioInfo.SoundRate >= 22000:
+				asc = asc + (2 << 2)
+			case rtp.AudioInfo.SoundRate >= 11000:
+				asc = asc + (1 << 2)
 			}
-			asc = asc+ 1<<1
-			rtp.PushAudio(pack.Timestamp,append([]byte{asc},payload...))
+			asc = asc + 1<<1
+			rtp.PushAudio(pack.Timestamp, append([]byte{asc}, payload...))
 		}
 	case RTP_TYPE_VIDEO:
 		rtp.WriteNALU(pack.Timestamp, pack.Payload)
