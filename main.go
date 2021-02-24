@@ -16,6 +16,11 @@ const (
 	RTP_TYPE_VIDEOCONTROL
 )
 
+const (
+	RTP_PT_PS   = 96
+	RTP_PT_H264 = 98
+)
+
 type RTPPack struct {
 	Type RTPType
 	rtp.Packet
@@ -48,6 +53,10 @@ type RTP_PS struct {
 func (rtp *RTP_PS) PushPS(ps []byte) {
 	if err := rtp.Unmarshal(ps); err != nil {
 		Println(err)
+	}
+	if rtp.Packet.PayloadType == RTP_PT_H264 {
+		rtp.WriteNALU(rtp.Timestamp, rtp.Payload)
+		return
 	}
 	if len(rtp.Payload) >= 4 && util.BigEndian.Uint32(rtp.Payload) == StartCodePS {
 		if rtp.psPacket != nil {
